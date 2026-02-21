@@ -12,22 +12,10 @@ const state = {
 };
 
 const PIN_POINTS = [
-  { x: 184 / 362, y: 27 / 362 },
-  { x: 96 / 362, y: 304 / 362 },
-  { x: 270 / 362, y: 301 / 362 },
+  { x: 0.5, y: 0.2 },
+  { x: 0.26, y: 0.77 },
+  { x: 0.74, y: 0.77 },
 ];
-
-const NORMALIZED_SIZE = 1024;
-const CANONICAL_DOTS = [
-  { x: (184 / 362) * NORMALIZED_SIZE, y: (27 / 362) * NORMALIZED_SIZE },
-  { x: (96 / 362) * NORMALIZED_SIZE, y: (304 / 362) * NORMALIZED_SIZE },
-  { x: (270 / 362) * NORMALIZED_SIZE, y: (301 / 362) * NORMALIZED_SIZE },
-];
-const CANONICAL_RING = {
-  cx: (181 / 362) * NORMALIZED_SIZE,
-  cy: (181 / 362) * NORMALIZED_SIZE,
-  r: (180 / 362) * NORMALIZED_SIZE,
-};
 
 const db = {
   instance: null,
@@ -408,18 +396,12 @@ function stopBlinker() {
 
 async function onImageCaptured(imageDataUrl) {
   stopCamera();
-  let normalizedImageDataUrl = imageDataUrl;
-  try {
-    normalizedImageDataUrl = await normalizeCapturedImage(imageDataUrl);
-  } catch (error) {
-    console.error("Normalization failed, using original capture.", error);
-  }
 
   if (state.captureTarget === "newSnapshot") {
     const snapshot = {
       id: crypto.randomUUID(),
       name: `Snapshot ${state.snapshots.length + 1}`,
-      imageDataUrl: normalizedImageDataUrl,
+      imageDataUrl,
       createdAt: Date.now(),
       lastVerifiedAt: null,
     };
@@ -433,7 +415,7 @@ async function onImageCaptured(imageDataUrl) {
   }
 
   if (state.captureTarget === "compareCurrent") {
-    state.stagedCompareImage = normalizedImageDataUrl;
+    state.stagedCompareImage = imageDataUrl;
     const active = getActiveSnapshot();
     if (active) {
       active.lastVerifiedAt = Date.now();
@@ -536,277 +518,6 @@ async function performCountdownCapture(videoEl, canvasEl, countdownEl) {
   const ctx = canvasEl.getContext("2d");
   ctx.drawImage(videoEl, sx, sy, size, size, 0, 0, 1024, 1024);
   return canvasEl.toDataURL("image/png");
-}
-
-async function normalizeCapturedImage(imageDataUrl) {
-  const source = await loadImage(imageDataUrl);
-  const squareCanvas = document.createElement("canvas");
-  squareCanvas.width = NORMALIZED_SIZE;
-  squareCanvas.height = NORMALIZED_SIZE;
-  const squareCtx = squareCanvas.getContext("2d");
-
-  const cropSize = Math.min(source.width, source.height);
-  const sx = (source.width - cropSize) / 2;
-  const sy = (source.height - cropSize) / 2;
-  squareCtx.drawImage(source, sx, sy, cropSize, cropSize, 0, 0, NORMALIZED_SIZE, NORMALIZED_SIZE);
-
-  const detectedDots = detectReferenceDots(squareCanvas);
-  if (!detectedDots) {
-    return squareCanvas.toDataURL("image/png");
-  }
-
-  const orderedDots = orderObservedDots(detectedDots);
-  if (!orderedDots) {
-    return squareCanvas.toDataURL("image/png");
-  }
-
-  const transform = computeBestAffineTransform(orderedDots, CANONICAL_DOTS);
-  if (!transform) {
-    return squareCanvas.toDataURL("image/png");
-  }
-
-  const normalizedCanvas = document.createElement("canvas");
-  normalizedCanvas.width = NORMALIZED_SIZE;
-  normalizedCanvas.height = NORMALIZED_SIZE;
-  const outCtx = normalizedCanvas.getContext("2d");
-  outCtx.fillStyle = "#000";
-  outCtx.fillRect(0, 0, NORMALIZED_SIZE, NORMALIZED_SIZE);
-  outCtx.setTransform(transform.a, transform.b, transform.c, transform.d, transform.e, transform.f);
-  outCtx.drawImage(squareCanvas, 0, 0);
-  outCtx.setTransform(1, 0, 0, 1, 0, 0);
-
-  // Keep only the template circle area so all snapshots share the same framing.
-  outCtx.globalCompositeOperation = "destination-in";
-  outCtx.beginPath();
-  outCtx.arc(CANONICAL_RING.cx, CANONICAL_RING.cy, CANONICAL_RING.r, 0, Math.PI * 2);
-  outCtx.fill();
-  outCtx.globalCompositeOperation = "destination-over";
-  outCtx.fillStyle = "#000";
-  outCtx.fillRect(0, 0, NORMALIZED_SIZE, NORMALIZED_SIZE);
-  outCtx.globalCompositeOperation = "source-over";
-
-  return normalizedCanvas.toDataURL("image/png");
-}
-
-function detectReferenceDots(sourceCanvas) {
-  const sampleSize = 256;
-  const sample = document.createElement("canvas");
-  sample.width = sampleSize;
-  sample.height = sampleSize;
-  const ctx = sample.getContext("2d");
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(sourceCanvas, 0, 0, sampleSize, sampleSize);
-
-  const { data } = ctx.getImageData(0, 0, sampleSize, sampleSize);
-  const cx = sampleSize / 2;
-  const cy = sampleSize / 2;
-  const ringR = sampleSize * 0.5;
-  const minR = ringR * 0.66;
-  const maxR = ringR * 0.95;
-  const mask = new Uint8Array(sampleSize * sampleSize);
-
-  for (let y = 0; y < sampleSize; y += 1) {
-    for (let x = 0; x < sampleSize; x += 1) {
-      const dx = x - cx;
-      const dy = y - cy;
-      const radius = Math.hypot(dx, dy);
-      if (radius < minR || radius > maxR) continue;
-
-      const i = (y * sampleSize + x) * 4;
-      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-      if (gray < 55) {
-        mask[y * sampleSize + x] = 1;
-      }
-    }
-  }
-
-  const components = connectedComponents(mask, sampleSize, sampleSize);
-  const candidates = components
-    .filter((comp) => comp.area >= 14 && comp.area <= 280)
-    .map((comp) => ({
-      x: (comp.cx / sampleSize) * NORMALIZED_SIZE,
-      y: (comp.cy / sampleSize) * NORMALIZED_SIZE,
-      area: comp.area,
-    }))
-    .sort((a, b) => b.area - a.area)
-    .slice(0, 20);
-
-  if (candidates.length < 3) return null;
-  const best = pickBestDotTriple(candidates);
-  return best;
-}
-
-function connectedComponents(mask, width, height) {
-  const visited = new Uint8Array(mask.length);
-  const components = [];
-  const queueX = [];
-  const queueY = [];
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      if (!mask[idx] || visited[idx]) continue;
-
-      let head = 0;
-      queueX.length = 0;
-      queueY.length = 0;
-      queueX.push(x);
-      queueY.push(y);
-      visited[idx] = 1;
-
-      let area = 0;
-      let sumX = 0;
-      let sumY = 0;
-
-      while (head < queueX.length) {
-        const qx = queueX[head];
-        const qy = queueY[head];
-        head += 1;
-        area += 1;
-        sumX += qx;
-        sumY += qy;
-
-        for (let ny = qy - 1; ny <= qy + 1; ny += 1) {
-          for (let nx = qx - 1; nx <= qx + 1; nx += 1) {
-            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-            const nIdx = ny * width + nx;
-            if (!mask[nIdx] || visited[nIdx]) continue;
-            visited[nIdx] = 1;
-            queueX.push(nx);
-            queueY.push(ny);
-          }
-        }
-      }
-
-      components.push({
-        area,
-        cx: sumX / area,
-        cy: sumY / area,
-      });
-    }
-  }
-
-  return components;
-}
-
-function pickBestDotTriple(candidates) {
-  const center = NORMALIZED_SIZE / 2;
-  let bestScore = Infinity;
-  let bestTriple = null;
-
-  for (let i = 0; i < candidates.length - 2; i += 1) {
-    for (let j = i + 1; j < candidates.length - 1; j += 1) {
-      for (let k = j + 1; k < candidates.length; k += 1) {
-        const points = [candidates[i], candidates[j], candidates[k]];
-        const distances = [
-          distance(points[0], points[1]),
-          distance(points[0], points[2]),
-          distance(points[1], points[2]),
-        ].sort((a, b) => a - b);
-
-        const maxD = distances[2];
-        if (maxD < 120) continue;
-        const shortRatio = distances[0] / maxD;
-        const midRatio = distances[1] / maxD;
-
-        const radii = points.map((p) => Math.hypot(p.x - center, p.y - center));
-        const meanRadius = (radii[0] + radii[1] + radii[2]) / 3;
-        const radiusSpread = Math.max(...radii) - Math.min(...radii);
-
-        const score =
-          Math.abs(shortRatio - 0.605) * 4 +
-          Math.abs(midRatio - 0.989) * 2 +
-          Math.abs(meanRadius - CANONICAL_RING.r * 0.84) / CANONICAL_RING.r +
-          radiusSpread / CANONICAL_RING.r;
-
-        if (score < bestScore) {
-          bestScore = score;
-          bestTriple = points;
-        }
-      }
-    }
-  }
-
-  return bestScore < 2.4 ? bestTriple : null;
-}
-
-function orderObservedDots(points) {
-  if (!points || points.length !== 3) return null;
-  const pairs = [
-    { a: 0, b: 1, d: distance(points[0], points[1]) },
-    { a: 0, b: 2, d: distance(points[0], points[2]) },
-    { a: 1, b: 2, d: distance(points[1], points[2]) },
-  ].sort((m, n) => m.d - n.d);
-
-  const base = pairs[0];
-  const topIndex = [0, 1, 2].find((idx) => idx !== base.a && idx !== base.b);
-  if (topIndex === undefined) return null;
-
-  const top = points[topIndex];
-  const p1 = points[base.a];
-  const p2 = points[base.b];
-  return [top, p1, p2];
-}
-
-function computeBestAffineTransform(observedDots, targetDots) {
-  const first = solveAffine(observedDots, targetDots);
-  const swappedObserved = [observedDots[0], observedDots[2], observedDots[1]];
-  const second = solveAffine(swappedObserved, targetDots);
-
-  if (first && first.det > 0) return first;
-  if (second && second.det > 0) return second;
-  return first || second || null;
-}
-
-function solveAffine(src, dst) {
-  const m = [
-    [src[0].x, src[0].y, 1],
-    [src[1].x, src[1].y, 1],
-    [src[2].x, src[2].y, 1],
-  ];
-  const u = [dst[0].x, dst[1].x, dst[2].x];
-  const v = [dst[0].y, dst[1].y, dst[2].y];
-
-  const xCoeffs = solveLinear3(m, u);
-  const yCoeffs = solveLinear3(m, v);
-  if (!xCoeffs || !yCoeffs) return null;
-
-  const [a, c, e] = xCoeffs;
-  const [b, d, f] = yCoeffs;
-  return { a, b, c, d, e, f, det: a * d - b * c };
-}
-
-function solveLinear3(matrix, values) {
-  const m = matrix.map((row, i) => [...row, values[i]]);
-
-  for (let pivot = 0; pivot < 3; pivot += 1) {
-    let best = pivot;
-    for (let r = pivot + 1; r < 3; r += 1) {
-      if (Math.abs(m[r][pivot]) > Math.abs(m[best][pivot])) best = r;
-    }
-    if (Math.abs(m[best][pivot]) < 1e-8) return null;
-    if (best !== pivot) {
-      const tmp = m[pivot];
-      m[pivot] = m[best];
-      m[best] = tmp;
-    }
-
-    const factor = m[pivot][pivot];
-    for (let c = pivot; c < 4; c += 1) m[pivot][c] /= factor;
-
-    for (let r = 0; r < 3; r += 1) {
-      if (r === pivot) continue;
-      const scale = m[r][pivot];
-      for (let c = pivot; c < 4; c += 1) m[r][c] -= scale * m[pivot][c];
-    }
-  }
-
-  return [m[0][3], m[1][3], m[2][3]];
-}
-
-function distance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function createPinCrop(source, point) {
