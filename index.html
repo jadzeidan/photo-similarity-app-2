@@ -64,7 +64,11 @@
           <video id="cameraVideo" autoplay playsinline muted></video>
           <canvas id="captureCanvas" class="hidden"></canvas>
           <div id="countdown" class="countdown hidden"></div>
-          <div class="ring-overlay"></div>
+          <div class="ring-overlay">
+            <span class="pin-marker pin-top" aria-hidden="true"></span>
+            <span class="pin-marker pin-left" aria-hidden="true"></span>
+            <span class="pin-marker pin-right" aria-hidden="true"></span>
+          </div>
         </div>
         <div class="camera-controls">
           <button id="captureBtn" class="btn btn-primary">Take Snapshot</button>
