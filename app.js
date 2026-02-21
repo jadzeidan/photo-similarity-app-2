@@ -420,10 +420,29 @@ async function onImageCaptured(imageDataUrl) {
 
 async function startCamera() {
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 1280 } },
-      audio: false,
-    });
+    try {
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 1280 },
+        },
+        audio: false,
+      });
+    } catch {
+      // Fallback for browsers/devices that reject advanced constraints.
+      state.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+
+    const videoEl = document.getElementById("cameraVideo");
+    if (videoEl) {
+      videoEl.srcObject = state.stream;
+      try {
+        await videoEl.play();
+      } catch {
+        // Some mobile browsers require an additional explicit user tap to start preview.
+      }
+    }
   } catch (error) {
     alert("Camera unavailable. You can still upload an image instead.");
     state.stream = null;
