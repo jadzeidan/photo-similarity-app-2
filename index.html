@@ -64,10 +64,13 @@
           <video id="cameraVideo" autoplay playsinline muted></video>
           <canvas id="captureCanvas" class="hidden"></canvas>
           <div id="countdown" class="countdown hidden"></div>
-          <div class="ring-overlay">
-            <span class="pin-marker pin-top" aria-hidden="true"></span>
-            <span class="pin-marker pin-left" aria-hidden="true"></span>
-            <span class="pin-marker pin-right" aria-hidden="true"></span>
+          <div class="ring-overlay" aria-hidden="true">
+            <svg viewBox="0 0 362 362" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="181" cy="181" r="180" stroke="black" stroke-width="2" />
+              <circle cx="184" cy="27" r="15" stroke="black" stroke-width="2" />
+              <circle cx="96" cy="304" r="15" stroke="black" stroke-width="2" />
+              <circle cx="270" cy="301" r="15" stroke="black" stroke-width="2" />
+            </svg>
           </div>
         </div>
         <div class="camera-controls">

@@ -145,35 +145,13 @@ video,
 .ring-overlay {
   position: absolute;
   inset: 11%;
-  border: 2px dashed var(--ring);
-  border-radius: 999px;
   pointer-events: none;
 }
 
-.pin-marker {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: #efefef;
-  border: 1px solid rgba(0, 0, 0, 0.8);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
-  transform: translate(-50%, -50%);
-}
-
-.pin-top {
-  left: 50%;
-  top: 7%;
-}
-
-.pin-left {
-  left: 21%;
-  top: 79%;
-}
-
-.pin-right {
-  left: 79%;
-  top: 79%;
+.ring-overlay svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .countdown {
