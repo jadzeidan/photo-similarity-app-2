@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EntropySeal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="top-bar">
+        <button id="backBtn" class="icon-btn hidden" aria-label="Go back">&#x2039;</button>
+        <div class="title-wrap">
+          <h1 id="screenTitle">Snapshots</h1>
+          <p id="screenSubtitle" class="subtitle"></p>
+        </div>
+      </header>
+
+      <main id="appMain" class="view-container"></main>
+
+      <footer class="bottom-bar">
+        <button id="primaryAction" class="btn btn-primary">Take Snapshot</button>
+      </footer>
+    </div>
+
+    <dialog id="nameDialog" class="app-dialog">
+      <form method="dialog" id="nameForm">
+        <h2>Rename Snapshot</h2>
+        <label for="nameInput">Name</label>
+        <input id="nameInput" name="name" maxlength="50" required />
+        <div class="dialog-actions">
+          <button value="cancel" class="btn btn-ghost" type="submit">Cancel</button>
+          <button value="confirm" class="btn btn-primary" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="confirmDialog" class="app-dialog">
+      <form method="dialog" id="confirmForm">
+        <h2 id="confirmTitle">Delete snapshot?</h2>
+        <p id="confirmBody"></p>
+        <div class="dialog-actions">
+          <button value="cancel" class="btn btn-ghost" type="submit">Cancel</button>
+          <button value="confirm" class="btn btn-danger" type="submit">Delete</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="homeTemplate">
+      <section class="home-list" id="snapshotList"></section>
+      <p class="empty-state" id="emptyState">No EntropySeal snapshots yet.</p>
+    </template>
+
+    <template id="cameraTemplate">
+      <section class="camera-view">
+        <p class="helper">Align the lid in frame and tap capture.</p>
+        <div class="media-wrap">
+          <video id="cameraVideo" autoplay playsinline></video>
+          <canvas id="captureCanvas" class="hidden"></canvas>
+          <div id="countdown" class="countdown hidden"></div>
+          <div class="ring-overlay"></div>
+        </div>
+        <div class="camera-controls">
+          <button id="captureBtn" class="btn btn-primary">Take Snapshot</button>
+          <label class="file-picker">
+            or upload image
+            <input id="fileInput" type="file" accept="image/*" capture="environment" />
+          </label>
+        </div>
+      </section>
+    </template>
+
+    <template id="snapshotTemplate">
+      <section class="snapshot-view">
+        <img id="snapshotImg" class="hero-image" alt="Snapshot" />
+        <p id="snapshotStatus" class="status"></p>
+        <div class="action-grid">
+          <button id="verifyBtn" class="btn btn-primary">Verify</button>
+          <button id="renameBtn" class="btn btn-ghost">Rename</button>
+          <button id="exportBtn" class="btn btn-ghost">Export Image</button>
+          <button id="deleteBtn" class="btn btn-danger">Delete</button>
+        </div>
+      </section>
+    </template>
+
+    <template id="compareTemplate">
+      <section class="compare-view">
+        <div class="mode-tabs">
+          <button id="blinkerTab" class="tab active">Blinker</button>
+          <button id="pinsTab" class="tab">Pins</button>
+        </div>
+
+        <div id="blinkerMode">
+          <p class="helper">Cycles between current and snapshot images.</p>
+          <div class="media-wrap compare-wrap">
+            <img id="blinkerImage" class="hero-image" alt="Comparison" />
+            <span id="blinkerLabel" class="mode-badge">Current</span>
+          </div>
+          <label class="slider-row" for="speedSlider">
+            Speed
+            <input id="speedSlider" type="range" min="300" max="3000" value="1200" step="100" />
+          </label>
+        </div>
+
+        <div id="pinsMode" class="hidden">
+          <p class="helper">Compare 3 local regions side by side.</p>
+          <div id="pinsGrid" class="pins-grid"></div>
+        </div>
+      </section>
+    </template>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
