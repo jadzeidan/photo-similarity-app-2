@@ -8,6 +8,7 @@ const state = {
   blinkerTimer: null,
   blinkerShowingCurrent: true,
   stream: null,
+  cameraReady: false,
 };
 
 const PIN_POINTS = [
@@ -190,7 +191,17 @@ function renderCamera() {
   const fileInput = fragment.getElementById("fileInput");
   const countdown = fragment.getElementById("countdown");
 
+  captureBtn.disabled = !state.cameraReady;
+  captureBtn.textContent = state.cameraReady ? "Take Snapshot" : "Starting camera...";
+
   captureBtn.addEventListener("click", async () => {
+    if (!state.cameraReady || !state.stream) {
+      await startCamera();
+      if (!state.cameraReady) {
+        alert("Camera is still unavailable. Check browser camera permission.");
+        return;
+      }
+    }
     const imageDataUrl = await performCountdownCapture(video, canvas, countdown);
     if (imageDataUrl) {
       await onImageCaptured(imageDataUrl);
@@ -419,6 +430,8 @@ async function onImageCaptured(imageDataUrl) {
 }
 
 async function startCamera() {
+  state.cameraReady = false;
+  setCameraUiReady(false);
   try {
     try {
       state.stream = await navigator.mediaDevices.getUserMedia({
@@ -453,19 +466,35 @@ async function startCamera() {
         // Some mobile browsers require an additional explicit user tap to start preview.
       }
     }
+    state.cameraReady = true;
+    setCameraUiReady(true);
   } catch (error) {
     alert("Camera unavailable. You can still upload an image instead.");
     state.stream = null;
+    state.cameraReady = false;
+    setCameraUiReady(false);
   }
 }
 
 function stopCamera() {
-  if (!state.stream) return;
-  state.stream.getTracks().forEach((track) => track.stop());
-  state.stream = null;
+  if (state.stream) {
+    state.stream.getTracks().forEach((track) => track.stop());
+    state.stream = null;
+  }
+  state.cameraReady = false;
+  setCameraUiReady(false);
 }
 
 async function performCountdownCapture(videoEl, canvasEl, countdownEl) {
+  if (!videoEl.srcObject && state.stream) {
+    videoEl.srcObject = state.stream;
+    try {
+      await videoEl.play();
+    } catch {
+      // Ignore and continue to explicit stream check below.
+    }
+  }
+
   for (let n = 3; n >= 1; n -= 1) {
     countdownEl.textContent = String(n);
     countdownEl.classList.remove("hidden");
@@ -474,7 +503,7 @@ async function performCountdownCapture(videoEl, canvasEl, countdownEl) {
   countdownEl.classList.add("hidden");
 
   if (!videoEl.srcObject) {
-    alert("No camera stream found. Please use image upload.");
+    alert("No camera stream found. Please allow camera access or use image upload.");
     return null;
   }
 
@@ -588,6 +617,13 @@ function escapeHtml(value) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setCameraUiReady(ready) {
+  const captureBtn = document.getElementById("captureBtn");
+  if (!captureBtn) return;
+  captureBtn.disabled = !ready;
+  captureBtn.textContent = ready ? "Take Snapshot" : "Starting camera...";
 }
 
 window.addEventListener("beforeunload", () => {
