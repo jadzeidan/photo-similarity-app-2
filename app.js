@@ -436,7 +436,17 @@ async function startCamera() {
 
     const videoEl = document.getElementById("cameraVideo");
     if (videoEl) {
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.autoplay = true;
       videoEl.srcObject = state.stream;
+      videoEl.onloadedmetadata = async () => {
+        try {
+          await videoEl.play();
+        } catch {
+          // Some browsers require explicit gesture even after metadata arrives.
+        }
+      };
       try {
         await videoEl.play();
       } catch {
