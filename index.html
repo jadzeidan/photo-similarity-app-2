@@ -85,7 +85,11 @@
 
     <template id="snapshotTemplate">
       <section class="snapshot-view">
-        <img id="snapshotImg" class="hero-image" alt="Snapshot" />
+        <div class="media-wrap">
+          <img id="snapshotImg" class="hero-image" alt="Snapshot" />
+          <div id="topDotMarker" class="top-dot-marker hidden" aria-hidden="true"></div>
+        </div>
+        <p id="snapshotOrientation" class="helper"></p>
         <p id="snapshotStatus" class="status"></p>
         <div class="action-grid">
           <button id="verifyBtn" class="btn btn-primary">Verify</button>

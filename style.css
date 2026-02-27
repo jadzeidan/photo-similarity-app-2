@@ -227,6 +227,17 @@ video,
   font-size: 0.84rem;
 }
 
+.top-dot-marker {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 3px solid #ff4040;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
 .mode-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;

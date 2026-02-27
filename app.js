@@ -237,8 +237,11 @@ function renderSnapshot() {
 
   const fragment = document.getElementById("snapshotTemplate").content.cloneNode(true);
   const image = fragment.getElementById("snapshotImg");
+  const topDotMarker = fragment.getElementById("topDotMarker");
+  const orientationText = fragment.getElementById("snapshotOrientation");
   const status = fragment.getElementById("snapshotStatus");
   image.src = snapshot.imageDataUrl;
+  renderOrientationDebug(snapshot.orientationDebug, topDotMarker, orientationText);
 
   if (snapshot.lastVerifiedAt) {
     status.textContent = `Verified ${formatDate(snapshot.lastVerifiedAt)}`;
@@ -398,9 +401,16 @@ function stopBlinker() {
 
 async function onImageCaptured(imageDataUrl) {
   stopCamera();
-  let processedImageDataUrl = imageDataUrl;
+  let processed = {
+    imageDataUrl,
+    orientationDebug: {
+      detected: false,
+      rotationDegrees: 0,
+      topDot: null,
+    },
+  };
   try {
-    processedImageDataUrl = await orientEntropySealImage(imageDataUrl);
+    processed = await orientEntropySealImage(imageDataUrl);
   } catch (error) {
     console.warn("EntropySeal orientation skipped:", error);
   }
@@ -409,7 +419,8 @@ async function onImageCaptured(imageDataUrl) {
     const snapshot = {
       id: crypto.randomUUID(),
       name: `Snapshot ${state.snapshots.length + 1}`,
-      imageDataUrl: processedImageDataUrl,
+      imageDataUrl: processed.imageDataUrl,
+      orientationDebug: processed.orientationDebug,
       createdAt: Date.now(),
       lastVerifiedAt: null,
     };
@@ -423,7 +434,7 @@ async function onImageCaptured(imageDataUrl) {
   }
 
   if (state.captureTarget === "compareCurrent") {
-    state.stagedCompareImage = processedImageDataUrl;
+    state.stagedCompareImage = processed.imageDataUrl;
     const active = getActiveSnapshot();
     if (active) {
       active.lastVerifiedAt = Date.now();
@@ -570,7 +581,14 @@ async function orientEntropySealImage(imageDataUrl) {
     cv.findContours(thresholded, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
     const landmarks = findEntropySealLandmarks(contours, sourceMat.cols, sourceMat.rows);
     if (!landmarks) {
-      return imageDataUrl;
+      return {
+        imageDataUrl,
+        orientationDebug: {
+          detected: false,
+          rotationDegrees: 0,
+          topDot: null,
+        },
+      };
     }
 
     const { center, apex } = landmarks;
@@ -585,9 +603,21 @@ async function orientEntropySealImage(imageDataUrl) {
       cv.INTER_LINEAR,
       cv.BORDER_REPLICATE
     );
+    const rotatedApex = applyAffineToPoint(matrix, apex);
+    const topDot = {
+      x: clamp(rotatedApex.x / sourceMat.cols, 0, 1),
+      y: clamp(rotatedApex.y / sourceMat.rows, 0, 1),
+    };
     matrix.delete();
 
-    return matToDataUrl(rotatedMat);
+    return {
+      imageDataUrl: matToDataUrl(rotatedMat),
+      orientationDebug: {
+        detected: true,
+        rotationDegrees: Number(rotationDegrees.toFixed(1)),
+        topDot,
+      },
+    };
   } finally {
     sourceMat.delete();
     rotatedMat.delete();
@@ -777,6 +807,21 @@ function ensureOpenCvReady() {
   return cvReadyPromise;
 }
 
+function renderOrientationDebug(orientationDebug, markerEl, textEl) {
+  const debug = orientationDebug || {};
+  const rotationDegrees = Number.isFinite(debug.rotationDegrees) ? debug.rotationDegrees : 0;
+  if (!(debug.detected && debug.topDot)) {
+    markerEl.classList.add("hidden");
+    textEl.textContent = `Auto-rotation: ${rotationDegrees.toFixed(1)}°. Top dot not confidently detected.`;
+    return;
+  }
+
+  markerEl.classList.remove("hidden");
+  markerEl.style.left = `${debug.topDot.x * 100}%`;
+  markerEl.style.top = `${debug.topDot.y * 100}%`;
+  textEl.textContent = `Auto-rotation: ${rotationDegrees.toFixed(1)}°. Red circle is the assumed top dot.`;
+}
+
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -857,6 +902,17 @@ function sleep(ms) {
 
 function distance(pointA, pointB) {
   return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+}
+
+function applyAffineToPoint(matrix, point) {
+  return {
+    x: matrix.doubleAt(0, 0) * point.x + matrix.doubleAt(0, 1) * point.y + matrix.doubleAt(0, 2),
+    y: matrix.doubleAt(1, 0) * point.x + matrix.doubleAt(1, 1) * point.y + matrix.doubleAt(1, 2),
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function setCameraUiReady(ready) {
