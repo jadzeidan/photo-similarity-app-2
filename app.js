@@ -17,6 +17,8 @@ const PIN_POINTS = [
   { x: 0.74, y: 0.77 },
 ];
 
+let cvReadyPromise = null;
+
 const db = {
   instance: null,
   async open() {
@@ -396,12 +398,18 @@ function stopBlinker() {
 
 async function onImageCaptured(imageDataUrl) {
   stopCamera();
+  let processedImageDataUrl = imageDataUrl;
+  try {
+    processedImageDataUrl = await orientEntropySealImage(imageDataUrl);
+  } catch (error) {
+    console.warn("EntropySeal orientation skipped:", error);
+  }
 
   if (state.captureTarget === "newSnapshot") {
     const snapshot = {
       id: crypto.randomUUID(),
       name: `Snapshot ${state.snapshots.length + 1}`,
-      imageDataUrl,
+      imageDataUrl: processedImageDataUrl,
       createdAt: Date.now(),
       lastVerifiedAt: null,
     };
@@ -415,7 +423,7 @@ async function onImageCaptured(imageDataUrl) {
   }
 
   if (state.captureTarget === "compareCurrent") {
-    state.stagedCompareImage = imageDataUrl;
+    state.stagedCompareImage = processedImageDataUrl;
     const active = getActiveSnapshot();
     if (active) {
       active.lastVerifiedAt = Date.now();
@@ -541,6 +549,234 @@ function createPinCrop(source, point) {
   return canvas.toDataURL("image/png");
 }
 
+async function orientEntropySealImage(imageDataUrl) {
+  await ensureOpenCvReady();
+  const sourceImage = await loadImage(imageDataUrl);
+  const sourceMat = cv.imread(sourceImage);
+  const rotatedMat = new cv.Mat();
+  const gray = new cv.Mat();
+  const blur = new cv.Mat();
+  const thresholded = new cv.Mat();
+  const kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+
+  try {
+    cv.cvtColor(sourceMat, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+    cv.threshold(blur, thresholded, 0, 255, cv.THRESH_BINARY_INV | cv.THRESH_OTSU);
+    cv.morphologyEx(thresholded, thresholded, cv.MORPH_OPEN, kernel);
+
+    cv.findContours(thresholded, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    const landmarks = findEntropySealLandmarks(contours, sourceMat.cols, sourceMat.rows);
+    if (!landmarks) {
+      return imageDataUrl;
+    }
+
+    const { center, apex } = landmarks;
+    const apexAngle = (Math.atan2(center.y - apex.y, apex.x - center.x) * 180) / Math.PI;
+    const rotationDegrees = 90 - apexAngle;
+    const matrix = cv.getRotationMatrix2D(new cv.Point(center.x, center.y), rotationDegrees, 1);
+    cv.warpAffine(
+      sourceMat,
+      rotatedMat,
+      matrix,
+      new cv.Size(sourceMat.cols, sourceMat.rows),
+      cv.INTER_LINEAR,
+      cv.BORDER_REPLICATE
+    );
+    matrix.delete();
+
+    return matToDataUrl(rotatedMat);
+  } finally {
+    sourceMat.delete();
+    rotatedMat.delete();
+    gray.delete();
+    blur.delete();
+    thresholded.delete();
+    kernel.delete();
+    contours.delete();
+    hierarchy.delete();
+  }
+}
+
+function findEntropySealLandmarks(contours, width, height) {
+  const center = { x: width / 2, y: height / 2 };
+  const minDim = Math.min(width, height);
+  const minArea = minDim * minDim * 0.000015;
+  const maxArea = minDim * minDim * 0.003;
+  const minRingRadius = minDim * 0.2;
+  const maxRingRadius = minDim * 0.49;
+  const candidates = [];
+
+  for (let i = 0; i < contours.size(); i += 1) {
+    const contour = contours.get(i);
+    const area = cv.contourArea(contour);
+    if (area < minArea || area > maxArea) {
+      contour.delete();
+      continue;
+    }
+
+    const perimeter = cv.arcLength(contour, true);
+    if (!perimeter) {
+      contour.delete();
+      continue;
+    }
+    const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+    if (circularity < 0.35) {
+      contour.delete();
+      continue;
+    }
+
+    const moments = cv.moments(contour);
+    if (!moments.m00) {
+      contour.delete();
+      continue;
+    }
+    const x = moments.m10 / moments.m00;
+    const y = moments.m01 / moments.m00;
+    const dx = x - center.x;
+    const dy = y - center.y;
+    const radius = Math.hypot(dx, dy);
+    if (radius < minRingRadius || radius > maxRingRadius) {
+      contour.delete();
+      continue;
+    }
+
+    candidates.push({ x, y, radius });
+    contour.delete();
+  }
+
+  if (candidates.length < 3) {
+    return null;
+  }
+
+  let bestTriplet = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let a = 0; a < candidates.length - 2; a += 1) {
+    for (let b = a + 1; b < candidates.length - 1; b += 1) {
+      for (let c = b + 1; c < candidates.length; c += 1) {
+        const points = [candidates[a], candidates[b], candidates[c]];
+        const distances = [
+          { key: [0, 1], value: distance(points[0], points[1]) },
+          { key: [0, 2], value: distance(points[0], points[2]) },
+          { key: [1, 2], value: distance(points[1], points[2]) },
+        ].sort((left, right) => left.value - right.value);
+
+        const base = distances[0].value;
+        const side1 = distances[1].value;
+        const side2 = distances[2].value;
+        if (base < minDim * 0.08) {
+          continue;
+        }
+
+        const avgSide = (side1 + side2) / 2;
+        const equalSidePenalty = Math.abs(side1 - side2) / Math.max(avgSide, 1);
+        const ratioPenalty = Math.abs(base / Math.max(avgSide, 1) - 0.78);
+        const radii = points.map((point) => point.radius);
+        const radiusSpread = Math.max(...radii) - Math.min(...radii);
+        const ringPenalty = radiusSpread / (minDim * 0.1);
+        const score = equalSidePenalty + ratioPenalty + ringPenalty;
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestTriplet = { points, basePair: distances[0].key };
+        }
+      }
+    }
+  }
+
+  if (!bestTriplet || bestScore > 1.2) {
+    return null;
+  }
+
+  const apexIndex = [0, 1, 2].find(
+    (index) => index !== bestTriplet.basePair[0] && index !== bestTriplet.basePair[1]
+  );
+  if (apexIndex == null) {
+    return null;
+  }
+
+  return {
+    center,
+    apex: bestTriplet.points[apexIndex],
+  };
+}
+
+function matToDataUrl(mat) {
+  const canvas = document.createElement("canvas");
+  canvas.width = mat.cols;
+  canvas.height = mat.rows;
+  cv.imshow(canvas, mat);
+  return canvas.toDataURL("image/png");
+}
+
+function ensureOpenCvReady() {
+  if (window.cv && typeof window.cv.Mat === "function") {
+    return Promise.resolve();
+  }
+  if (cvReadyPromise) {
+    return cvReadyPromise;
+  }
+
+  cvReadyPromise = new Promise((resolve, reject) => {
+    let finished = false;
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("OpenCV did not initialize in time."));
+    }, 8000);
+
+    const cleanup = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      window.removeEventListener("opencv-ready", checkReady);
+    };
+
+    const checkReady = () => {
+      if (window.cv && typeof window.cv.Mat === "function") {
+        cleanup();
+        resolve();
+      }
+    };
+
+    window.addEventListener("opencv-ready", checkReady);
+
+    const attachRuntimeCallback = () => {
+      if (!window.cv) return false;
+      if (typeof window.cv.Mat === "function") {
+        checkReady();
+        return true;
+      }
+      const prior = window.cv.onRuntimeInitialized;
+      window.cv.onRuntimeInitialized = () => {
+        if (typeof prior === "function") {
+          prior();
+        }
+        window.dispatchEvent(new Event("opencv-ready"));
+      };
+      return true;
+    };
+
+    if (!attachRuntimeCallback()) {
+      const interval = window.setInterval(() => {
+        if (finished) {
+          clearInterval(interval);
+          return;
+        }
+        if (attachRuntimeCallback()) {
+          clearInterval(interval);
+        }
+      }, 100);
+    }
+
+    checkReady();
+  });
+
+  return cvReadyPromise;
+}
+
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -617,6 +853,10 @@ function escapeHtml(value) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function distance(pointA, pointB) {
+  return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
 }
 
 function setCameraUiReady(ready) {
